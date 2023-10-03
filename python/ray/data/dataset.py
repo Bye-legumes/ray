@@ -166,6 +166,28 @@ TensorflowFeatureTypeSpec = Union[
 TensorFlowTensorBatchType = Union["tf.Tensor", Dict[str, "tf.Tensor"]]
 
 
+@ray.remote
+def compute_indices(index_column_data, condition_func):
+    """ This function only operates on the index column data """
+    indices = index_column_data[index_column_data.apply(condition_func)].index.tolist()
+    return indices
+
+def extract_index_column(block, column_name):
+    from ray.data.block import BlockAccessor
+    accessor = BlockAccessor.for_block(block)
+    df = accessor.to_pandas()
+    return df[column_name]
+
+@ray.remote
+def retrieve_data_by_indices(block, indices):
+    from ray.data.block import BlockAccessor
+    accessor = BlockAccessor.for_block(block)
+    df = accessor.to_pandas()
+    filtered_df = df.loc[indices]
+    return ray.data.block.TableBlock(filtered_df)
+
+
+
 @PublicAPI
 class Dataset(Generic[T]):
     """A Dataset is a distributed data collection for data loading and processing.
@@ -293,36 +315,24 @@ class Dataset(Generic[T]):
     
 
     def filter_index(self, condition_func):
-        """
-        Filter the dataset based on the condition applied to the index column.
-
-        Parameters:
-        - condition_func (callable): A function that takes an index value as input 
-                                    and returns True or False.
-
-        Returns:
-        Dataset: A new dataset containing only the rows where the index 
-                satisfies the condition.
-        """
         if not hasattr(self, 'index_column') or not self.index_column:
             raise ValueError("You need to set an index column first using set_index method.")
         
-        # Define a function to filter a block
-        def filter_block(block):
-            accessor = ray.data.block.BlockAccessor.for_block(block)
-            # Assuming the block can be transformed into a pandas dataframe for filtering
-            df = accessor.to_pandas()
-            filtered_df = df[df[self.index_column].apply(condition_func)]
-            # Convert it back to a block
-            return ray.data.block.TableBlock(filtered_df)
+        # Extract only the index columns locally
+        index_columns = [extract_index_column(block, self.index_column) for block in self._blocks]
 
-        # Map the filter_block function across the dataset
-        # Here I am using map_blocks assuming such a method exists. If Ray provides a different method to apply a function
-        # to each block, use that.
-        filtered_blocks = self.map_blocks(filter_block)
+        # Step 1: Compute indices remotely using only the index columns
+        index_futures = [compute_indices.remote(index_col, condition_func) for index_col in index_columns]
+        all_indices = ray.get(index_futures)
 
-        # The result is a new dataset with the filtered blocks
-        return ray.data.Dataset(filtered_blocks)
+        # Step 2: Retrieve data based on indices
+        data_futures = [retrieve_data_by_indices.remote(block, indices) for block, indices in zip(self._blocks, all_indices)]
+        filtered_blocks = ray.get(data_futures)
+
+        # Construct a new Dataset from the filtered blocks
+        # Replace "from_blocks" with the correct method or mechanism from Ray's API.
+        return ray.data.Dataset.from_blocks(filtered_blocks)
+
 
 
 
