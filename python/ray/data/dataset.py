@@ -291,29 +291,29 @@ class Dataset(Generic[T]):
         
 
     def filter_index(self, condition_func):
-    """
-    Filter the dataset based on the condition applied to the index column.
+        """
+        Filter the dataset based on the condition applied to the index column.
 
-    Parameters:
-    - condition_func (callable): A function that takes an index value as input 
-                                 and returns True or False.
+        Parameters:
+        - condition_func (callable): A function that takes an index value as input 
+                                    and returns True or False.
 
-    Returns:
-    Dataset: A new dataset containing only the rows where the index 
-             satisfies the condition.
-    """
-    if not hasattr(self, 'index_column') or not self.index_column:
-        raise ValueError("You need to set an index column first using set_index method.")
+        Returns:
+        Dataset: A new dataset containing only the rows where the index 
+                satisfies the condition.
+        """
+        if not hasattr(self, 'index_column') or not self.index_column:
+            raise ValueError("You need to set an index column first using set_index method.")
 
-    # Use the BlockAccessor utility of Ray's Dataset to work with blocks
-    new_blocks = []
-    for block in self._blocks:
-        accessor = BlockAccessor.for_block(block)
-        filtered_block = accessor.filter(lambda row: condition_func(row[self.index_column]))
-        new_blocks.append(filtered_block)
+        # Use the BlockAccessor utility of Ray's Dataset to work with blocks
+        new_blocks = []
+        for block in self._blocks:
+            accessor = BlockAccessor.for_block(block)
+            filtered_block = accessor.filter(lambda row: condition_func(row[self.index_column]))
+            new_blocks.append(filtered_block)
 
-    # Now use these blocks to create a new Dataset
-    return Dataset(new_blocks)
+        # Now use these blocks to create a new Dataset
+        return Dataset(new_blocks)
 
 
     def _extract_column_data(self, column_name):
