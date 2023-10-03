@@ -187,8 +187,10 @@ def retrieve_data_by_indices(block, indices):
     return ray.data.block.TableBlock(filtered_df)
 
 def get_all_blocks(dataset):
-    """Get all blocks from a Ray Dataset."""
-    return [block for block in dataset]
+    """Get all blocks/batches from a Ray Dataset."""
+    # Extract blocks using iter_batches and setting batch format to pandas to get entire blocks as DataFrame
+    return [batch for batch in dataset.iter_batches(batch_format="pandas")]
+
 
 
 
