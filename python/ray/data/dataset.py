@@ -291,30 +291,29 @@ class Dataset(Generic[T]):
         
 
     def filter_index(self, condition_func):
-        """
-        Filter the dataset based on the condition applied to the index column.
+    """
+    Filter the dataset based on the condition applied to the index column.
 
-        Parameters:
-        - condition_func (callable): A function that takes an index value as input 
-                                     and returns True or False.
+    Parameters:
+    - condition_func (callable): A function that takes an index value as input 
+                                 and returns True or False.
 
-        Returns:
-        Dataset: A new dataset containing only the rows where the index 
-                 satisfies the condition.
-        """
-        if not hasattr(self, 'index_column') or not self.index_column:
-            raise ValueError("You need to set an index column first using set_index method.")
+    Returns:
+    Dataset: A new dataset containing only the rows where the index 
+             satisfies the condition.
+    """
+    if not hasattr(self, 'index_column') or not self.index_column:
+        raise ValueError("You need to set an index column first using set_index method.")
 
-        # Placeholder for actual Ray's Dataset method to transform or map data.
-        # Assuming there's a map_partitions or similar method in Ray's Dataset.
-        def filter_partition(part):
-            return part[part[self.index_column].apply(condition_func)]
+    # Use the BlockAccessor utility of Ray's Dataset to work with blocks
+    new_blocks = []
+    for block in self._blocks:
+        accessor = BlockAccessor.for_block(block)
+        filtered_block = accessor.filter(lambda row: condition_func(row[self.index_column]))
+        new_blocks.append(filtered_block)
 
-        # Use a method similar to 'map_partitions' to apply the filter function to each partition.
-        # This method will apply the function to each shard or partition of the dataset.
-        filtered_dataset = self.map_partitions(filter_partition)  # Adjust this based on Ray's actual method
-
-        return filtered_dataset
+    # Now use these blocks to create a new Dataset
+    return Dataset(new_blocks)
 
 
     def _extract_column_data(self, column_name):
