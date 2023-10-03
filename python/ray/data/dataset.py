@@ -285,7 +285,7 @@ class Dataset(Generic[T]):
         # representation of the data is unknown)
         # This is also a logical operation, the real world implementation 
         # would involve creating a new logical plan or rearranging data.
-        self.index = column_name 
+        self.index_column = column_name 
         
         return self
         
