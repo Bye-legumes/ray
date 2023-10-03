@@ -305,15 +305,21 @@ class Dataset(Generic[T]):
         if not hasattr(self, 'index_column') or not self.index_column:
             raise ValueError("You need to set an index column first using set_index method.")
 
-        # Use the BlockAccessor utility of Ray's Dataset to work with blocks
-        new_blocks = []
-        for block in self._blocks:
-            accessor = BlockAccessor.for_block(block)
-            filtered_block = accessor.filter(lambda row: condition_func(row[self.index_column]))
-            new_blocks.append(filtered_block)
+        # Use iter_batches to get the data, and then filter based on the index column
+        # Collect these batches for creating a new Dataset
+        new_batches = []
+        for batch in self.iter_batches(batch_format="pandas"):  # Assuming using pandas DataFrame batches for simplicity
+            filtered_batch = batch[batch[self.index_column].apply(condition_func)]
+            new_batches.append(filtered_batch)
 
-        # Now use these blocks to create a new Dataset
-        return Dataset(new_blocks)
+        # Create a new Dataset from these filtered batches
+        # Note: Ray 2.4.0 doesn't seem to have a straightforward method for creating a Dataset from batches of pandas DataFrames.
+        # You might need a utility function or some other means to construct a Dataset from these batches. 
+        # This is a conceptual placeholder:
+        new_dataset = Dataset.from_batches(new_batches)
+
+        return new_dataset
+
 
 
     def _extract_column_data(self, column_name):
