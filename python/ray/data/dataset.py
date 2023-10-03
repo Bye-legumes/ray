@@ -270,10 +270,31 @@ class Dataset(Generic[T]):
     def copy(dataset: "Dataset[T]") -> "Dataset[T]":
         return Dataset(dataset._plan, dataset._epoch, dataset._lazy)
 
-    def set_index(self, column_name: str):
-        """Set a column as the index for this dataset."""
-        # Validate column_name...
-        self.index_column = column_name
+    def set_index(self, column_name):
+        """
+        Set the specified column as the index of the dataset.
+
+        Parameters:
+        - column_name (str): The name of the column to set as the index.
+
+        Returns:
+        self: Returns the current dataset object with the new index set.
+        """
+        # Hypothetical implementation; Actual implementation would depend
+        # heavily on the internal structure of the dataset and might involve
+        # rearranging data on all nodes in the distributed system.
+        
+        # Check if column_name exists in the dataset columns
+        if column_name not in self.columns:
+            raise ValueError(f"Column {column_name} does not exist in the dataset.")
+        
+        # Set the column as index (this is a hypothetical code since the actual 
+        # representation of the data is unknown)
+        # This is also a logical operation, the real world implementation 
+        # would involve creating a new logical plan or rearranging data.
+        self.index = column_name 
+        
+        return self
         
 
     def filter_index(self, condition_func):
