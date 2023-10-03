@@ -178,17 +178,16 @@ def extract_index_column(block, column_name):
     df = accessor.to_pandas()
     return df[column_name]
 
-@ray.remote
-def retrieve_data_by_indices(block, indices):
+def retrieve_data_by_indices_local(block, indices):
     from ray.data.block import BlockAccessor
     accessor = BlockAccessor.for_block(block)
     df = accessor.to_pandas()
     filtered_df = df.loc[indices]
-    return ray.data.block.TableBlock(filtered_df)
+    return filtered_df
+
 
 def get_all_blocks(dataset):
     """Get all blocks/batches from a Ray Dataset."""
-    # Extract blocks using iter_batches and setting batch format to pandas to get entire blocks as DataFrame
     return [batch for batch in dataset.iter_batches(batch_format="pandas")]
 
 
@@ -332,13 +331,14 @@ class Dataset(Generic[T]):
         index_futures = [compute_indices.remote(index_col, condition_func) for index_col in index_columns]
         all_indices = ray.get(index_futures)
 
-        # Step 2: Retrieve data based on indices
-        data_futures = [retrieve_data_by_indices.remote(block, indices) for block, indices in zip(all_blocks, all_indices)]
-        filtered_blocks = ray.get(data_futures)
+        # Step 2: Retrieve data based on indices, locally
+        filtered_dataframes = [retrieve_data_by_indices_local(block, indices) for block, indices in zip(all_blocks, all_indices)]
 
-        # Construct a new Dataset from the filtered blocks
-        # Replace "from_blocks" with the correct method or mechanism from Ray's API.
-        return ray.data.Dataset.from_blocks(filtered_blocks)  # Assuming a hypothetical method "from_blocks"
+        # Combine the filtered dataframes and create a new Dataset
+        # Here, you might need to use a specific function/method provided by Ray to create a Dataset from a list of DataFrames
+        # Assuming Ray has a method like "from_pandas", but you might need to adjust this
+        return ray.data.Dataset.from_pandas(filtered_dataframes)
+
 
 
 
