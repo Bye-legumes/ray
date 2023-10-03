@@ -304,22 +304,17 @@ class Dataset(Generic[T]):
         """
         if not hasattr(self, 'index_column') or not self.index_column:
             raise ValueError("You need to set an index column first using set_index method.")
-        
-        # The actual implementation will depend on how you can access and filter 
-        # the data within Ray's Dataset. For this example, I will make a 
-        # conceptual representation using 'partitions' as a placeholder.
-        
-        filtered_partitions = []
-        for partition in self.partitions:  # Adjust based on Ray's method of data storage
-            # Apply filter on the index column for this partition
-            filtered_partition = partition[partition[self.index_column].apply(condition_func)]
-            filtered_partitions.append(filtered_partition)
 
-        # Create a new Dataset with the filtered partitions
-        # Again, this is conceptual and you'll need to adjust based on Ray's methods.
-        new_dataset = Dataset(partitions=filtered_partitions)
+        # Placeholder for actual Ray's Dataset method to transform or map data.
+        # Assuming there's a map_partitions or similar method in Ray's Dataset.
+        def filter_partition(part):
+            return part[part[self.index_column].apply(condition_func)]
 
-        return new_dataset
+        # Use a method similar to 'map_partitions' to apply the filter function to each partition.
+        # This method will apply the function to each shard or partition of the dataset.
+        filtered_dataset = self.map_partitions(filter_partition)  # Adjust this based on Ray's actual method
+
+        return filtered_dataset
 
 
     def _extract_column_data(self, column_name):
