@@ -186,6 +186,10 @@ def retrieve_data_by_indices(block, indices):
     filtered_df = df.loc[indices]
     return ray.data.block.TableBlock(filtered_df)
 
+def get_all_blocks(dataset):
+    """Get all blocks from a Ray Dataset."""
+    return [block for block in dataset]
+
 
 
 @PublicAPI
@@ -319,19 +323,20 @@ class Dataset(Generic[T]):
             raise ValueError("You need to set an index column first using set_index method.")
         
         # Extract only the index columns locally
-        index_columns = [extract_index_column(block, self.index_column) for block in self._blocks]
+        all_blocks = get_all_blocks(self)
+        index_columns = [extract_index_column(block, self.index_column) for block in all_blocks]
 
         # Step 1: Compute indices remotely using only the index columns
         index_futures = [compute_indices.remote(index_col, condition_func) for index_col in index_columns]
         all_indices = ray.get(index_futures)
 
         # Step 2: Retrieve data based on indices
-        data_futures = [retrieve_data_by_indices.remote(block, indices) for block, indices in zip(self._blocks, all_indices)]
+        data_futures = [retrieve_data_by_indices.remote(block, indices) for block, indices in zip(all_blocks, all_indices)]
         filtered_blocks = ray.get(data_futures)
 
         # Construct a new Dataset from the filtered blocks
         # Replace "from_blocks" with the correct method or mechanism from Ray's API.
-        return ray.data.Dataset.from_blocks(filtered_blocks)
+        return ray.data.Dataset.from_blocks(filtered_blocks)  # Assuming a hypothetical method "from_blocks"
 
 
 
