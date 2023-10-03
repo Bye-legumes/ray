@@ -306,22 +306,24 @@ class Dataset(Generic[T]):
         """
         if not hasattr(self, 'index_column') or not self.index_column:
             raise ValueError("You need to set an index column first using set_index method.")
+        
+        # Define a function to filter a block
+        def filter_block(block):
+            accessor = ray.data.block.BlockAccessor.for_block(block)
+            # Assuming the block can be transformed into a pandas dataframe for filtering
+            df = accessor.to_pandas()
+            filtered_df = df[df[self.index_column].apply(condition_func)]
+            # Convert it back to a block
+            return ray.data.block.TableBlock(filtered_df)
 
-        # Use iter_batches to get the data, and then filter based on the index column
-        # Collect these batches for creating a new Dataset
-        new_batches = []
+        # Map the filter_block function across the dataset
+        # Here I am using map_blocks assuming such a method exists. If Ray provides a different method to apply a function
+        # to each block, use that.
+        filtered_blocks = self.map_blocks(filter_block)
 
-        for batch in self.iter_batches(batch_format="pandas"):  # Assuming using pandas DataFrame batches for simplicity
-            filtered_batch = batch[batch[self.index_column].apply(condition_func)]
-            new_batches.append(filtered_batch)
-        import pandas as pd
-        # Concatenate these batches into a single pandas DataFrame
-        concatenated_df = pd.concat(new_batches, ignore_index=True)
+        # The result is a new dataset with the filtered blocks
+        return ray.data.Dataset(filtered_blocks)
 
-        # Create a new Dataset from this dataframe using from_pandas method
-        new_dataset = ray.data.from_pandas(concatenated_df)
-
-        return new_dataset
 
 
 
