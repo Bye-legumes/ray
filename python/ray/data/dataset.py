@@ -272,27 +272,61 @@ class Dataset(Generic[T]):
 
     def set_index(self, column_name: str):
         """Set a column as the index for this dataset."""
-        # We need to ensure that the column exists in the dataset.
-        # This might require checking the first block or some representative sample.
-        first_block = self._blocks[0]
-        if column_name not in first_block.schema():
-            raise ValueError(f"Column '{column_name}' does not exist in the dataset.")
-        
+        # Validate column_name...
         self.index_column = column_name
+        
 
-    def filter_index(self, predicate):
-        """Filter the dataset based on the index column values."""
-        if not self.index_column:
-            raise ValueError("No index column set. Use `set_index` first.")
+    def filter_index(self, condition_func):
+        """
+        Filter the dataset based on the condition applied to the index column.
 
-        def index_filter(block):
-            # This will depend on the block's structure.
-            # Assuming the block is a table-like object with a `filter` method:
-            mask = predicate(block[self.index_column])
-            return block.filter(mask)
+        Parameters:
+        - condition_func (callable): A function that takes an index value as input 
+                                     and returns True or False.
 
-        # Transform the blocks using the filtering function.
-        return self.map_blocks(index_filter)
+        Returns:
+        Dataset: A new dataset containing only the rows where the index 
+                 satisfies the condition.
+        """
+        if not hasattr(self, 'index') or not self.index:
+            raise ValueError("You need to set an index column first using set_index method.")
+        
+        # Hypothetical implementation
+        # You would ideally optimize this to be efficient with distributed data.
+        # If the dataset is partitioned based on the index, you can skip entire partitions 
+        # that don't satisfy the condition based on min/max index values for that partition.
+        
+        # Use a logical operation to represent the filtering 
+        # without actually applying it until necessary.
+        # The actual filtering mechanism will depend on the underlying data structure 
+        # and its distributed nature.
+        filtered_blocks = []
+        for block in self.data_blocks:
+            # Check if the block has any relevant data based on the index
+            # This is a simplified assumption; in a distributed system,
+            # you might have metadata about blocks or partitions to make this determination.
+            if any(condition_func(index_value) for index_value in block[self.index]):
+                filtered_block = block[block[self.index].apply(condition_func)]
+                filtered_blocks.append(filtered_block)
+
+        # Construct a new dataset using the filtered blocks
+        # The actual mechanism will vary depending on Ray's internal data structures.
+        new_dataset = Dataset(data_blocks=filtered_blocks)
+
+        return new_dataset
+
+    def _extract_column_data(self, column_name):
+        """Extract data from a column and return an optimized representation."""
+        index_data = []
+
+        # Assuming `blocks` is a list-like structure of data chunks (e.g., DataFrames).
+        for block in self.blocks:
+            # If blocks are pandas DataFrames:
+            index_data.extend(block[column_name].tolist())
+
+            # If blocks are Arrow tables or another structure, adjust the extraction method accordingly.
+
+        return index_data
 
     def map(
         self,
