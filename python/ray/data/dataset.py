@@ -255,6 +255,7 @@ class Dataset(Generic[T]):
         self._epoch = epoch
         self._lazy = lazy
         self._logical_plan = logical_plan
+        self.index_column = None
         if logical_plan is not None:
             self._plan.link_logical_plan(logical_plan)
 
@@ -267,6 +268,42 @@ class Dataset(Generic[T]):
     @staticmethod
     def copy(dataset: "Dataset[T]") -> "Dataset[T]":
         return Dataset(dataset._plan, dataset._epoch, dataset._lazy)
+
+    def set_index(self, column_name: str):
+        """Set a column as the index for this dataset."""
+        # Check if the column name exists in the dataset.
+        # The actual checking mechanism might need to be more complex depending on the data structure.
+        if not self.has_column(column_name):
+            raise ValueError(f"Column '{column_name}' does not exist in the dataset.")
+        self.index_column = column_name
+
+    def has_column(self, column_name: str) -> bool:
+        """Check if the dataset contains a specific column."""
+        # This is a simple placeholder function and might need adjustments based on the actual data structure.
+        # For instance, you might need to interact with the block or other internal dataset structures.
+        return column_name in self.schema().field_names
+    
+    def filter_index(self, predicate):
+        """Filter the dataset based on the index column values."""
+        if not self.index_column:
+            raise ValueError("No index column set. Use `set_index` first.")
+
+        def index_filter(block: Block) -> Block:
+            accessor = BlockAccessor.for_block(block)
+            # Use Arrow's efficient filter mechanism if it's an Arrow block
+            if isinstance(block, ArrowRow):
+                table = accessor._table
+                column_data = table.column(self.index_column)
+                mask = predicate(column_data)
+                return table.filter(mask)
+            else:
+                # For other block types, you might need a more generic approach
+                filtered_rows = filter(lambda row: predicate(row[self.index_column]), accessor.iter_rows())
+                return BlockAccessor.from_rows(filtered_rows)
+
+        # Transform the blocks using the filtering function.
+        # Note: This assumes there's a `map_blocks` or similar function.
+        return self.map_blocks(index_filter)
 
     def map(
         self,
