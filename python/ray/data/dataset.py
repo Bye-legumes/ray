@@ -290,6 +290,8 @@ class Dataset(Generic[T]):
         return self
         
 
+    
+
     def filter_index(self, condition_func):
         """
         Filter the dataset based on the condition applied to the index column.
@@ -308,17 +310,19 @@ class Dataset(Generic[T]):
         # Use iter_batches to get the data, and then filter based on the index column
         # Collect these batches for creating a new Dataset
         new_batches = []
+
         for batch in self.iter_batches(batch_format="pandas"):  # Assuming using pandas DataFrame batches for simplicity
             filtered_batch = batch[batch[self.index_column].apply(condition_func)]
             new_batches.append(filtered_batch)
+        import pandas as pd
+        # Concatenate these batches into a single pandas DataFrame
+        concatenated_df = pd.concat(new_batches, ignore_index=True)
 
-        # Create a new Dataset from these filtered batches
-        # Note: Ray 2.4.0 doesn't seem to have a straightforward method for creating a Dataset from batches of pandas DataFrames.
-        # You might need a utility function or some other means to construct a Dataset from these batches. 
-        # This is a conceptual placeholder:
-        new_dataset = Dataset.from_batches(new_batches)
+        # Create a new Dataset from this dataframe using from_pandas method
+        new_dataset = ray.data.from_pandas(concatenated_df)
 
         return new_dataset
+
 
 
 
