@@ -273,8 +273,12 @@ class Dataset(Generic[T]):
 
     def set_index(self, column_name: str):
         """Set a column as the index for this dataset."""
-        # You might want to do some checks here to make sure that the column_name
-        # exists in all blocks, but for simplicity, we'll just assign it.
+        # We need to ensure that the column exists in the dataset.
+        # This might require checking the first block or some representative sample.
+        first_block = self._blocks[0]
+        if column_name not in first_block.schema():
+            raise ValueError(f"Column '{column_name}' does not exist in the dataset.")
+        
         self.index_column = column_name
 
     def filter_index(self, predicate):
@@ -282,17 +286,13 @@ class Dataset(Generic[T]):
         if not self.index_column:
             raise ValueError("No index column set. Use `set_index` first.")
 
-        def index_filter(block: ArrowBlock) -> ArrowBlock:
-            # This assumes the block is an ArrowBlock, which might not always be the case.
-            table = block._table
-            if self.index_column not in table.column_names:
-                raise ValueError(f"Index column '{self.index_column}' not found in block.")
-            column_data = table.column(self.index_column)
-            mask = predicate(column_data)
-            return ArrowBlock(table.filter(mask))
+        def index_filter(block):
+            # This will depend on the block's structure.
+            # Assuming the block is a table-like object with a `filter` method:
+            mask = predicate(block[self.index_column])
+            return block.filter(mask)
 
         # Transform the blocks using the filtering function.
-        # This will return a new Dataset with filtered data.
         return self.map_blocks(index_filter)
 
     def map(
