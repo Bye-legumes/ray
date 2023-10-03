@@ -337,7 +337,7 @@ class Dataset(Generic[T]):
         # Combine the filtered dataframes and create a new Dataset
         # Here, you might need to use a specific function/method provided by Ray to create a Dataset from a list of DataFrames
         # Assuming Ray has a method like "from_pandas", but you might need to adjust this
-        return ray.data.Dataset.from_pandas(filtered_dataframes)
+        return ray.data.from_pandas(filtered_dataframes)
 
 
 
