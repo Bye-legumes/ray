@@ -302,32 +302,25 @@ class Dataset(Generic[T]):
         Dataset: A new dataset containing only the rows where the index 
                  satisfies the condition.
         """
-        if not hasattr(self, 'index') or not self.index:
+        if not hasattr(self, 'index_column') or not self.index_column:
             raise ValueError("You need to set an index column first using set_index method.")
         
-        # Hypothetical implementation
-        # You would ideally optimize this to be efficient with distributed data.
-        # If the dataset is partitioned based on the index, you can skip entire partitions 
-        # that don't satisfy the condition based on min/max index values for that partition.
+        # The actual implementation will depend on how you can access and filter 
+        # the data within Ray's Dataset. For this example, I will make a 
+        # conceptual representation using 'partitions' as a placeholder.
         
-        # Use a logical operation to represent the filtering 
-        # without actually applying it until necessary.
-        # The actual filtering mechanism will depend on the underlying data structure 
-        # and its distributed nature.
-        filtered_blocks = []
-        for block in self.data_blocks:
-            # Check if the block has any relevant data based on the index
-            # This is a simplified assumption; in a distributed system,
-            # you might have metadata about blocks or partitions to make this determination.
-            if any(condition_func(index_value) for index_value in block[self.index]):
-                filtered_block = block[block[self.index].apply(condition_func)]
-                filtered_blocks.append(filtered_block)
+        filtered_partitions = []
+        for partition in self.partitions:  # Adjust based on Ray's method of data storage
+            # Apply filter on the index column for this partition
+            filtered_partition = partition[partition[self.index_column].apply(condition_func)]
+            filtered_partitions.append(filtered_partition)
 
-        # Construct a new dataset using the filtered blocks
-        # The actual mechanism will vary depending on Ray's internal data structures.
-        new_dataset = Dataset(data_blocks=filtered_blocks)
+        # Create a new Dataset with the filtered partitions
+        # Again, this is conceptual and you'll need to adjust based on Ray's methods.
+        new_dataset = Dataset(partitions=filtered_partitions)
 
         return new_dataset
+
 
     def _extract_column_data(self, column_name):
         """Extract data from a column and return an optimized representation."""
