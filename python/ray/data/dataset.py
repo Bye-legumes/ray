@@ -189,24 +189,8 @@ def retrieve_data_by_indices_local(block, indices):
 def get_all_blocks(dataset):
     """Get all blocks/batches from a Ray Dataset."""
     return [batch for batch in dataset.iter_batches(batch_format="pandas")]
-import gc  # Garbage collector
 
 
-def efficient_from_pandas(dfs: List[pd.DataFrame], parallelism: int = 200) -> ray.data.Dataset:
-    from ray.data.impl.arrow_block import ArrowBlockBuilder
-    from ray.data.block import BlockAccessor
-
-    # Convert dataframes to Arrow blocks without additional copies
-    arrow_blocks = [BlockAccessor.from_pandas(df, copy=False) for df in dfs]
-
-    # If you don't need the original pandas dataframes, you can free up memory
-    del dfs
-    gc.collect()  # Trigger garbage collection to free memory
-
-    # Construct Ray Dataset from arrow blocks
-    dataset = ray.data.Dataset(arrow_blocks)
-
-    return dataset
 
 
 @PublicAPI
@@ -313,8 +297,6 @@ class Dataset(Generic[T]):
     def copy(dataset: "Dataset[T]") -> "Dataset[T]":
         return Dataset(dataset._plan, dataset._epoch, dataset._lazy)
 
-
-
     def set_index(self, column_name):
         """
         Set the specified column as the index of the dataset.
@@ -353,7 +335,9 @@ class Dataset(Generic[T]):
         filtered_dataframes = [retrieve_data_by_indices_local(block, indices) for block, indices in zip(all_blocks, all_indices)]
 
         # Combine the filtered dataframes and create a new Dataset
-        return efficient_from_pandas(filtered_dataframes)
+        # Here, you might need to use a specific function/method provided by Ray to create a Dataset from a list of DataFrames
+        # Assuming Ray has a method like "from_pandas", but you might need to adjust this
+        return ray.data.from_pandas(filtered_dataframes)
 
 
 
