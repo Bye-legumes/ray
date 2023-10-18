@@ -182,7 +182,7 @@ def retrieve_data_by_indices_local(block, indices):
     from ray.data.block import BlockAccessor
     accessor = BlockAccessor.for_block(block)
     df = accessor.to_pandas()
-    filtered_df = df.loc[indices]
+    filtered_df = df.loc[ray.get(indices)]
     return filtered_df
 
 
@@ -329,7 +329,7 @@ class Dataset(Generic[T]):
 
         # Step 1: Compute indices remotely using only the index columns
         index_futures = [compute_indices.remote(index_col, condition_func) for index_col in index_columns]
-        all_indices = ray.get(index_futures)
+        all_indices = index_futures
 
         # Step 2: Retrieve data based on indices, locally
         filtered_dataframes = [retrieve_data_by_indices_local(block, indices) for block, indices in zip(all_blocks, all_indices)]
