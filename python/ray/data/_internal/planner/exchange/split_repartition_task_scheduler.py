@@ -98,7 +98,6 @@ class SplitRepartitionTaskScheduler(ExchangeTaskScheduler):
         reduce_block_refs, reduce_metadata = list(reduce_block_refs), list(
             reduce_metadata
         )
-        del split_block_refs
         # Handle empty blocks.
         if len(reduce_block_refs) < output_num_blocks:
             import pyarrow as pa
