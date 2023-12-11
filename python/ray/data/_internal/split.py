@@ -113,27 +113,16 @@ def _split_single_block(
     split_blocks = []
     block_accessor = BlockAccessor.for_block(block)
     prev_index = 0
-    # append one more entry at the last so we don't
-    # need handle empty edge case.
     split_indices.append(meta.num_rows)
     for index in split_indices:
-        logger.debug(f"slicing block {prev_index}:{index}")
-        stats = BlockExecStats.builder()
-        split_block = block_accessor.slice(prev_index, index)
+        # Use a more memory-efficient slicing method if available
+        split_block = efficient_slice(block_accessor, prev_index, index)
         accessor = BlockAccessor.for_block(split_block)
-        _meta = BlockMetadata(
-            num_rows=accessor.num_rows(),
-            size_bytes=accessor.size_bytes(),
-            schema=meta.schema,
-            input_files=meta.input_files,
-            exec_stats=stats.build(),
-        )
+        _meta = create_block_metadata(accessor, meta)
         split_meta.append(_meta)
         split_blocks.append(split_block)
         prev_index = index
-    results = [(block_id, split_meta)]
-    results.extend(split_blocks)
-    return tuple(results)
+    return (block_id, split_meta), *split_blocks
 
 
 def _drop_empty_block_split(block_split_indices: List[int], num_rows: int) -> List[int]:
