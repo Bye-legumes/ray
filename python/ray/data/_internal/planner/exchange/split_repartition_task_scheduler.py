@@ -1,4 +1,5 @@
 from typing import Any, Dict, List, Optional, Tuple
+
 import ray
 from ray.data._internal.execution.interfaces import RefBundle, TaskContext
 from ray.data._internal.planner.exchange.interfaces import ExchangeTaskScheduler
@@ -9,7 +10,16 @@ from ray.data._internal.stats import StatsDict
 from ray.data.block import Block, BlockAccessor, BlockMetadata
 from ray.types import ObjectRef
 
+
 class SplitRepartitionTaskScheduler(ExchangeTaskScheduler):
+    """
+    The split (non-shuffle) repartition scheduler.
+
+    First, we calculate global splits needed to produce `output_num_blocks` blocks.
+    After the split blocks are generated accordingly, reduce tasks are scheduled
+    to combine split blocks together.
+    """
+
     def execute(
         self,
         refs: List[RefBundle],
@@ -18,82 +28,115 @@ class SplitRepartitionTaskScheduler(ExchangeTaskScheduler):
         map_ray_remote_args: Optional[Dict[str, Any]] = None,
         reduce_ray_remote_args: Optional[Dict[str, Any]] = None,
     ) -> Tuple[List[RefBundle], StatsDict]:
-        input_num_rows = sum(ref_bundle.num_rows() for ref_bundle in refs)
-        input_owned_by_consumer = all(ref_bundle.owns_blocks for ref_bundle in refs)
+        input_num_rows = 0
+        input_owned_by_consumer = True
+        for ref_bundle in refs:
+            block_num_rows = ref_bundle.num_rows()
+            if block_num_rows is None:
+                raise ValueError(
+                    "Cannot split partition on blocks with unknown number of rows."
+                )
+            input_num_rows += block_num_rows
+            if not ref_bundle.owns_blocks:
+                input_owned_by_consumer = False
 
-        indices = self.optimized_split_indices(refs, output_num_blocks)
+        # Compute the (output_num_blocks) indices needed for an equal split of the
+        # input blocks. When output_num_blocks=1, the total number of
+        # input rows is used as the end index during the split calculation,
+        # so that we can combine all input blocks into a single output block.
+        indices = []
+        if output_num_blocks == 1:
+            indices = [input_num_rows]
+        else:
+            cur_idx = 0
+            for _ in range(output_num_blocks - 1):
+                cur_idx += input_num_rows / output_num_blocks
+                indices.append(int(cur_idx))
+        assert len(indices) <= output_num_blocks, (indices, output_num_blocks)
 
-        blocks_with_metadata = [block for ref_bundle in refs for block in ref_bundle.blocks]
-        split_return = self.streamlined_split_at_indices(blocks_with_metadata, indices, input_owned_by_consumer)
+        if map_ray_remote_args is None:
+            map_ray_remote_args = {}
+        if reduce_ray_remote_args is None:
+            reduce_ray_remote_args = {}
+        if "scheduling_strategy" not in reduce_ray_remote_args:
+            reduce_ray_remote_args = reduce_ray_remote_args.copy()
+            reduce_ray_remote_args["scheduling_strategy"] = "SPREAD"
+
+        blocks_with_metadata: List[Tuple[ObjectRef[Block], BlockMetadata]] = []
+        for ref_bundle in refs:
+            blocks_with_metadata.extend(ref_bundle.blocks)
+        split_return = _split_at_indices(
+            blocks_with_metadata, indices, input_owned_by_consumer
+        )
+
         del blocks_with_metadata
 
-        split_block_refs, split_metadata = zip(*split_return)
+        split_block_refs, split_metadata = [], []
+        for b, m in zip(*split_return):
+            split_block_refs.append(b)
+            split_metadata.extend(m)
         del split_return
+        sub_progress_bar_dict = ctx.sub_progress_bar_dict
+        bar_name = ShuffleTaskSpec.SPLIT_REPARTITION_SUB_PROGRESS_BAR_NAME
+        assert bar_name in sub_progress_bar_dict, sub_progress_bar_dict
+        reduce_bar = sub_progress_bar_dict[bar_name]
 
-        reduce_task = cached_remote_fn(self.optimized_reduce)
+        reduce_task = cached_remote_fn(self._exchange_spec.reduce)
         reduce_return = [
             reduce_task.options(**reduce_ray_remote_args, num_returns=2).remote(
+                *self._exchange_spec._reduce_args,
                 *split_block_refs[j],
             )
             for j in range(output_num_blocks)
-            if split_block_refs[j]
+            # Only process splits which contain blocks.
+            if len(split_block_refs[j]) > 0
         ]
-        del split_block_refs
 
         reduce_block_refs, reduce_metadata = zip(*reduce_return)
-        del reduce_return
-
-        output = [RefBundle([(block, meta)], owns_blocks=input_owned_by_consumer) for block, meta in zip(reduce_block_refs, reduce_metadata)]
-        del reduce_block_refs, reduce_metadata
-
-        stats = {"split": split_metadata, "reduce": reduce_metadata}
-        return output, stats
-
-    def optimized_split_indices(self, refs: List[RefBundle], output_num_blocks: int) -> List[int]:
-        total_rows = sum(ref_bundle.num_rows() for ref_bundle in refs)
-        rows_per_block = total_rows // output_num_blocks
-        indices = []
-        current_row_count = 0
-
-        for ref_bundle in refs:
-            current_row_count += ref_bundle.num_rows()
-            if current_row_count >= rows_per_block:
-                indices.append(current_row_count)
-                current_row_count = 0
-
-        return indices
-
-    def streamlined_split_at_indices(self, blocks_with_metadata, indices, input_owned_by_consumer):
-        current_index = 0
-        for block, metadata in blocks_with_metadata:
-            block_accessor = BlockAccessor.for_block(block)
-            while current_index < len(indices) and block_accessor.num_rows() > 0:
-                split_index = indices[current_index] - block_accessor.start_row()
-                if split_index >= block_accessor.num_rows():
-                    yield block, metadata
-                    current_index += 1
-                else:
-                    split_block, remaining_block = block_accessor.split(split_index)
-                    yield split_block, metadata
-                    block_accessor = BlockAccessor.for_block(remaining_block)
-
-    def optimized_reduce(self, *mapper_outputs: List[Block], partial_reduce: bool = False) -> (Block, BlockMetadata):
-        from ray.data._internal.delegating_block_builder import DelegatingBlockBuilder
-        from ray.data.block import BlockAccessor, BlockMetadata
-
-        builder = DelegatingBlockBuilder()
-        for block in mapper_outputs:
-            builder.add_block(block)
-
-        combined_block = builder.build()
-        accessor = BlockAccessor.for_block(combined_block)
-
-        new_metadata = BlockMetadata(
-            num_rows=accessor.num_rows(),
-            size_bytes=accessor.size_bytes(),
-            schema=accessor.schema(),
-            input_files=None,
-            exec_stats=None,
+        del reduce_return, split_block_refs
+        reduce_metadata = reduce_bar.fetch_until_complete(list(reduce_metadata))
+        reduce_block_refs, reduce_metadata = list(reduce_block_refs), list(
+            reduce_metadata
         )
+        del split_block_refs
+        # Handle empty blocks.
+        if len(reduce_block_refs) < output_num_blocks:
+            import pyarrow as pa
 
-        return combined_block, new_metadata
+            from ray.data._internal.arrow_block import ArrowBlockBuilder
+            from ray.data._internal.pandas_block import (
+                PandasBlockBuilder,
+                PandasBlockSchema,
+            )
+
+            num_empty_blocks = output_num_blocks - len(reduce_block_refs)
+            first_block_schema = reduce_metadata[0].schema
+            if first_block_schema is None:
+                raise ValueError(
+                    "Cannot split partition on blocks with unknown block format."
+                )
+            elif isinstance(first_block_schema, pa.Schema):
+                builder = ArrowBlockBuilder()
+            elif isinstance(first_block_schema, PandasBlockSchema):
+                builder = PandasBlockBuilder()
+            empty_block = builder.build()
+            empty_meta = BlockAccessor.for_block(empty_block).get_metadata(
+                input_files=None, exec_stats=None
+            )  # No stats for empty block.
+            empty_block_refs, empty_metadata = zip(
+                *[(ray.put(empty_block), empty_meta) for _ in range(num_empty_blocks)]
+            )
+            reduce_block_refs.extend(empty_block_refs)
+            reduce_metadata.extend(empty_metadata)
+
+        output = []
+        for block, meta in zip(reduce_block_refs, reduce_metadata):
+            output.append(
+                RefBundle([(block, meta)], owns_blocks=input_owned_by_consumer)
+            )
+        stats = {
+            "split": split_metadata,
+            "reduce": reduce_metadata,
+        }
+
+        return (output, stats)
