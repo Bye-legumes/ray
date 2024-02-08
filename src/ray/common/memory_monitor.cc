@@ -105,7 +105,7 @@ std::tuple<int64_t, int64_t> MemoryMonitor::GetMemoryBytes() {
   /// limit. TODO(clarng): find a better way to detect cgroup memory limit is used.
   system_total_bytes = NullableMin(system_total_bytes, cgroup_total_bytes);
   /// This assumes cgroup total bytes will look different than system (meminfo)
-  if (system_total_bytes == cgroup_total_bytes) {
+  if (system_total_bytes != cgroup_total_bytes) {
     system_used_bytes = cgroup_used_bytes;
   }
   return std::tuple(system_used_bytes, system_total_bytes);
