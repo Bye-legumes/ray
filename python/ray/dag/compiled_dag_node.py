@@ -2044,90 +2044,195 @@ class CompiledDAG:
                     f"Task at index {idx} does not have a valid 'dag_node'. "
                     "Ensure that 'experimental_compile()' completed successfully."
                 )
+        if format == "ascii":
+            from collections import defaultdict, deque
+            adj_list = defaultdict(list)
+            indegree = defaultdict(int)
 
-        # Dot file for debuging
-        dot = graphviz.Digraph(name="compiled_graph", format=format)
+            for idx, task in self.idx_to_task.items():
+                for arg in task.dag_node.get_args():
+                    if isinstance(arg, DAGNode):
+                        upstream_task_idx = self.dag_node_to_idx[arg]
+                        adj_list[upstream_task_idx].append(idx)
+                        indegree[idx] += 1
 
-        # Add nodes with task information
-        for idx, task in self.idx_to_task.items():
-            dag_node = task.dag_node
+            # Step 2: Topologically sort nodes to determine layers
+            layers = defaultdict(list)
+            zero_indegree = deque([idx for idx in self.idx_to_task if indegree[idx] == 0])
+            layer_index = 0
 
-            # Initialize the label and attributes
-            label = f"Task {idx}\n"
-            shape = "oval"  # Default shape
-            style = "filled"
-            fillcolor = ""
+            while zero_indegree:
+                next_layer = deque()
+                while zero_indegree:
+                    task_idx = zero_indegree.popleft()
+                    layers[layer_index].append(task_idx)
+                    for downstream in adj_list[task_idx]:
+                        indegree[downstream] -= 1
+                        if indegree[downstream] == 0:
+                            next_layer.append(downstream)
+                zero_indegree = next_layer
+                layer_index += 1
 
-            # Handle different types of dag_node
-            if isinstance(dag_node, InputNode):
-                label += "InputNode"
-                shape = "rectangle"
-                fillcolor = "lightblue"
-            elif isinstance(dag_node, InputAttributeNode):
-                label += f"InputAttributeNode[{dag_node.key}]"
-                shape = "rectangle"
-                fillcolor = "lightblue"
-            elif isinstance(dag_node, MultiOutputNode):
-                label += "MultiOutputNode"
-                shape = "rectangle"
-                fillcolor = "yellow"
-            elif isinstance(dag_node, ClassMethodNode):
-                if dag_node.is_class_method_call:
-                    # Class Method Call Node
-                    method_name = dag_node.get_method_name()
-                    actor_handle = dag_node._get_actor_handle()
-                    if actor_handle:
-                        actor_id = actor_handle._actor_id.hex()
-                        label += f"Actor: {actor_id[:6]}...\nMethod: {method_name}"
+            # Step 3: Determine the grid size based on layer height and max nodes per layer
+            max_width = max(len(layer) for layer in layers.values())
+            height = len(layers)
+            grid_width = max_width * 20
+            grid_height = height * 2 - 1
+
+            # Step 4: Initialize an empty grid
+            grid = [[" " for _ in range(grid_width)] for _ in range(grid_height)]
+
+            # Step 5: Place nodes in the grid with multi-output alignment
+            task_to_pos = {}
+            for layer_num, layer_tasks in layers.items():
+                layer_y = layer_num * 2  # Every second row for nodes
+                spacing = grid_width // (len(layer_tasks) + 1)
+                for col_num, task_idx in enumerate(layer_tasks):
+                    col_x = (col_num + 1) * spacing
+                    task = self.idx_to_task[task_idx]
+                    task_info = f"{task_idx}:"
+
+                    # Determine task label based on node type
+                    if isinstance(task.dag_node, ClassMethodNode):
+                        if task.dag_node.is_class_method_call:
+                            method_name = task.dag_node.get_method_name()
+                            task_info += f"Actor:{method_name}"
+                        elif task.dag_node.is_class_method_output:
+                            task_info += f"Output[{task.dag_node.output_idx}]"
+                        else:
+                            task_info += "UnknownMethod"
+                    elif isinstance(task.dag_node, MultiOutputNode):
+                        task_info += "MultiOutputNode"
                     else:
-                        label += f"Method: {method_name}"
-                    shape = "oval"
-                    fillcolor = "lightgreen"
-                elif dag_node.is_class_method_output:
-                    # Class Method Output Node
-                    label += f"ClassMethodOutputNode[{dag_node.output_idx}]"
+                        task_info += type(task.dag_node).__name__
+
+                    # Place the task information into the grid
+                    for i, char in enumerate(task_info):
+                        if col_x + i < grid_width:
+                            grid[layer_y][col_x + i] = char
+
+                    task_to_pos[task_idx] = (layer_y, col_x)
+                    
+                    # Adjust for multi-output tasks
+                    if isinstance(task.dag_node, MultiOutputNode):
+                        for i, arg in enumerate(task.dag_node.get_args()):
+                            if isinstance(arg, DAGNode):
+                                output_task_idx = self.dag_node_to_idx[arg]
+                                if output_task_idx not in task_to_pos:
+                                    # Place output task horizontally from current position
+                                    task_to_pos[output_task_idx] = (layer_y + 2, col_x + i * 15)
+
+            # Step 6: Connect the nodes with lines
+            for upstream_task, downstream_tasks in adj_list.items():
+                upstream_y, upstream_x = task_to_pos[upstream_task]
+                for downstream_task in downstream_tasks:
+                    downstream_y, downstream_x = task_to_pos[downstream_task]
+
+                    # Draw vertical line
+                    for y in range(upstream_y + 1, downstream_y):
+                        grid[y][upstream_x] = "|"
+                    
+                    # Draw horizontal line if needed
+                    if upstream_x != downstream_x:
+                        for x in range(min(upstream_x, downstream_x) + 1, max(upstream_x, downstream_x)):
+                            if grid[downstream_y - 1][x] != '|':
+                                grid[downstream_y - 1][x] = '-'
+                    # Draw connection to the next task
+                    grid[downstream_y - 1][downstream_x] = "|"
+
+            # Convert grid to string for printing
+            ascii_graph = "\n".join("".join(row) for row in grid)
+
+            # Return or print ASCII graph
+            if return_dot:
+                return ascii_graph
+            else:
+                print(ascii_graph)
+        
+        else:
+            # Dot file for debuging
+            dot = graphviz.Digraph(name="compiled_graph", format=format)
+
+            # Add nodes with task information
+            for idx, task in self.idx_to_task.items():
+                dag_node = task.dag_node
+
+                # Initialize the label and attributes
+                label = f"Task {idx}\n"
+                shape = "oval"  # Default shape
+                style = "filled"
+                fillcolor = ""
+
+                # Handle different types of dag_node
+                if isinstance(dag_node, InputNode):
+                    label += "InputNode"
                     shape = "rectangle"
-                    fillcolor = "orange"
+                    fillcolor = "lightblue"
+                elif isinstance(dag_node, InputAttributeNode):
+                    label += f"InputAttributeNode[{dag_node.key}]"
+                    shape = "rectangle"
+                    fillcolor = "lightblue"
+                elif isinstance(dag_node, MultiOutputNode):
+                    label += "MultiOutputNode"
+                    shape = "rectangle"
+                    fillcolor = "yellow"
+                elif isinstance(dag_node, ClassMethodNode):
+                    if dag_node.is_class_method_call:
+                        # Class Method Call Node
+                        method_name = dag_node.get_method_name()
+                        actor_handle = dag_node._get_actor_handle()
+                        if actor_handle:
+                            actor_id = actor_handle._actor_id.hex()
+                            label += f"Actor: {actor_id[:6]}...\nMethod: {method_name}"
+                        else:
+                            label += f"Method: {method_name}"
+                        shape = "oval"
+                        fillcolor = "lightgreen"
+                    elif dag_node.is_class_method_output:
+                        # Class Method Output Node
+                        label += f"ClassMethodOutputNode[{dag_node.output_idx}]"
+                        shape = "rectangle"
+                        fillcolor = "orange"
+                    else:
+                        # Unexpected ClassMethodNode
+                        label += "ClassMethodNode"
+                        shape = "diamond"
+                        fillcolor = "red"
                 else:
-                    # Unexpected ClassMethodNode
-                    label += "ClassMethodNode"
+                    # Unexpected node type
+                    label += type(dag_node).__name__
                     shape = "diamond"
                     fillcolor = "red"
+
+                # Add the node to the graph with attributes
+                dot.node(str(idx), label, shape=shape, style=style, fillcolor=fillcolor)
+
+            # Add edges with type hints based on argument mappings
+            for idx, task in self.idx_to_task.items():
+                current_task_idx = idx
+
+                for arg_index, arg in enumerate(task.dag_node.get_args()):
+                    if isinstance(arg, DAGNode):
+                        # Get the upstream task index
+                        upstream_task_idx = self.dag_node_to_idx[arg]
+
+                        # Get the type hint for this argument
+                        if arg_index < len(task.arg_type_hints):
+                            type_hint = type(task.arg_type_hints[arg_index]).__name__
+                        else:
+                            type_hint = "UnknownType"
+
+                        # Draw an edge from the upstream task to the
+                        # current task with the type hint
+                        dot.edge(
+                            str(upstream_task_idx), str(current_task_idx), label=type_hint
+                        )
+
+            if return_dot:
+                return dot.source
             else:
-                # Unexpected node type
-                label += type(dag_node).__name__
-                shape = "diamond"
-                fillcolor = "red"
-
-            # Add the node to the graph with attributes
-            dot.node(str(idx), label, shape=shape, style=style, fillcolor=fillcolor)
-
-        # Add edges with type hints based on argument mappings
-        for idx, task in self.idx_to_task.items():
-            current_task_idx = idx
-
-            for arg_index, arg in enumerate(task.dag_node.get_args()):
-                if isinstance(arg, DAGNode):
-                    # Get the upstream task index
-                    upstream_task_idx = self.dag_node_to_idx[arg]
-
-                    # Get the type hint for this argument
-                    if arg_index < len(task.arg_type_hints):
-                        type_hint = type(task.arg_type_hints[arg_index]).__name__
-                    else:
-                        type_hint = "UnknownType"
-
-                    # Draw an edge from the upstream task to the
-                    # current task with the type hint
-                    dot.edge(
-                        str(upstream_task_idx), str(current_task_idx), label=type_hint
-                    )
-
-        if return_dot:
-            return dot.source
-        else:
-            # Render the graph to a file
-            dot.render(filename, view=view)
+                # Render the graph to a file
+                dot.render(filename, view=view)
 
     def teardown(self):
         """Teardown and cancel all actor tasks for this DAG. After this
