@@ -2001,26 +2001,44 @@ class CompiledDAG:
         return fut
 
     def visualize(
-        self, filename="compiled_graph", format="png", view=False, return_dot=False
+        self, format="png", filename="compiled_graph", view=False
     ):
         """
         Visualize the compiled graph using Graphviz.
 
-        This method generates a graphical representation of the compiled graph,
-        showing tasks and their dependencies.This method should be called
-        **after** the graph has been compiled using `experimental_compile()`.
+        his method provides two modes for visualization:
+        1. **Graphviz PNG/PDF**: Generates a graphical file representing tasks as 
+            nodes with edges representing dependencies. 
+        2. **ASCII Format**: Prints a detailed text-based visualization of the CG, 
+            including task nodes, types, and edges with type hints.
+
+        This method should be called **after** compiling the graph with `experimental_compile()`.
+
 
         Args:
+            format (str): The output format for the visualization. Options:
+                - `"png"` (default): Generates a PNG file using Graphviz.
+                - `"pdf"`: Generates a PDF file using Graphviz.
+                - `"ascii"`: Prints the CG structure in ASCII format to the console.
             filename: The name of the output file (without extension).
-            format: The format of the output file (e.g., 'png', 'pdf').
             view: Whether to open the file with the default viewer.
-            return_dot: If True, returns the DOT source as a string instead of figure.
 
+        Returns:
+            - **None** if `format` is `"png"` or `"pdf"`.
+            - **str** if `format` is `"ascii"`, returning the ASCII representation of the CG.
+            
         Raises:
             ValueError: If the graph is empty or not properly compiled.
             ImportError: If the `graphviz` package is not installed.
 
-        """
+        Example:
+            ```python
+            # Visualize the compiled CG in PNG format
+            compiled_dag.visualize(format='png')
+
+            # Print the CG structure in ASCII format
+            print(compiled_dag.visualize(format='ascii'))
+            """
         import graphviz
         from ray.dag import (
             InputAttributeNode,
@@ -2054,16 +2072,49 @@ class CompiledDAG:
             child2parent = defaultdict(int)
             ascii_visualization = ""
             node_info = {}
+            edge_info = []
 
 
             for idx, task in self.idx_to_task.items():
-                downstream_nodes = []
-                for arg in task.dag_node.get_args():
+                
+                dag_node = task.dag_node
+                label = f"Task {idx}\n"
+
+                # Determine the type and label of the node
+                if isinstance(dag_node, InputNode):
+                    label += "InputNode"
+                elif isinstance(dag_node, InputAttributeNode):
+                    label += f"InputAttributeNode[{dag_node.key}]"
+                elif isinstance(dag_node, MultiOutputNode):
+                    label += "MultiOutputNode"
+                elif isinstance(dag_node, ClassMethodNode):
+                    if dag_node.is_class_method_call:
+                        method_name = dag_node.get_method_name()
+                        actor_handle = dag_node._get_actor_handle()
+                        actor_id = actor_handle._actor_id.hex()[:6] if actor_handle else "unknown"
+                        label += f"Actor: {actor_id}...\nMethod: {method_name}"
+                    elif dag_node.is_class_method_output:
+                        label += f"ClassMethodOutputNode[{dag_node.output_idx}]"
+                    else:
+                        label += "ClassMethodNode"
+                else:
+                    label += type(dag_node).__name__
+
+                node_info[idx] = label
+
+                for arg_index, arg in enumerate(dag_node.get_args()):
                     if isinstance(arg, DAGNode):
                         upstream_task_idx = self.dag_node_to_idx[arg]
+
+                        # Get the type hint for this argument
+                        if arg_index < len(task.arg_type_hints):
+                            type_hint = type(task.arg_type_hints[arg_index]).__name__
+                        else:
+                            type_hint = "UnknownType"
+
                         adj_list[upstream_task_idx].append(idx)
                         indegree[idx] += 1
-                        downstream_nodes.append(idx)
+                        edge_info.append((upstream_task_idx, idx, type_hint))
 
             width_adjust =  0
             for upstream_task_idx, child_idx_list in adj_list.items():
@@ -2091,6 +2142,16 @@ class CompiledDAG:
                             next_layer.append(downstream)
                 zero_indegree = next_layer
                 layer_index += 1
+
+            # Print detailed node information
+            ascii_visualization += "Nodes Information:\n"
+            for idx, info in node_info.items():
+                ascii_visualization += f"{idx} [label=\"{info}\"] \n"
+
+            # Print edges
+            ascii_visualization += "\nEdges Information:\n"
+            for upstream_task, downstream_task, type_hint in edge_info:
+                ascii_visualization += f"{upstream_task} -> {downstream_task} [label={type_hint}]\n"
 
             # Find the maximum width (number of nodes in any layer)
             max_width = max(len(layer) for layer in layers.values()) + width_adjust
@@ -2165,13 +2226,11 @@ class CompiledDAG:
                                 grid[output_y - 1][output_x] = "|"
 
             # Convert grid to string for printing
-            ascii_graph = "\n".join("".join(row) for row in grid)
+            ascii_visualization += "\nExperimental Graph Built:\n"
+            ascii_visualization += "\n".join("".join(row) for row in grid)
 
-            # Return or print ASCII graph
-            if return_dot:
-                return ascii_graph
-            else:
-                print(ascii_graph)
+            return ascii_visualization
+
         
         else:
             # Dot file for debuging
@@ -2252,11 +2311,8 @@ class CompiledDAG:
                             str(upstream_task_idx), str(current_task_idx), label=type_hint
                         )
 
-            if return_dot:
-                return dot.source
-            else:
-                # Render the graph to a file
-                dot.render(filename, view=view)
+
+            dot.render(filename, view=view)
 
     def teardown(self):
         """Teardown and cancel all actor tasks for this DAG. After this
