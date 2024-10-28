@@ -2046,17 +2046,36 @@ class CompiledDAG:
                 )
         if format == "ascii":
             from collections import defaultdict, deque
+            # Create adjacency list representation of the DAG
             adj_list = defaultdict(list)
             indegree = defaultdict(int)
 
+            is_multi_output = defaultdict(bool)
+            child2parent = defaultdict(int)
+            ascii_visualization = ""
+            node_info = {}
+
+
             for idx, task in self.idx_to_task.items():
+                downstream_nodes = []
                 for arg in task.dag_node.get_args():
                     if isinstance(arg, DAGNode):
                         upstream_task_idx = self.dag_node_to_idx[arg]
                         adj_list[upstream_task_idx].append(idx)
                         indegree[idx] += 1
+                        downstream_nodes.append(idx)
 
-            # Step 2: Topologically sort nodes to determine layers
+            width_adjust =  0
+            for upstream_task_idx, child_idx_list in adj_list.items():
+                # Mark as multi-output if the node has more than one output path
+                if len(child_idx_list) > 1:
+                    for child in child_idx_list:
+                        is_multi_output[child] = True
+                        child2parent[child] = upstream_task_idx
+                    width_adjust = max(width_adjust, len(child_idx_list))
+
+
+            # Topological sort to determine layers
             layers = defaultdict(list)
             zero_indegree = deque([idx for idx in self.idx_to_task if indegree[idx] == 0])
             layer_index = 0
@@ -2073,26 +2092,23 @@ class CompiledDAG:
                 zero_indegree = next_layer
                 layer_index += 1
 
-            # Step 3: Determine the grid size based on layer height and max nodes per layer
-            max_width = max(len(layer) for layer in layers.values())
+            # Find the maximum width (number of nodes in any layer)
+            max_width = max(len(layer) for layer in layers.values()) + width_adjust
             height = len(layers)
-            grid_width = max_width * 20
-            grid_height = height * 2 - 1
 
-            # Step 4: Initialize an empty grid
-            grid = [[" " for _ in range(grid_width)] for _ in range(grid_height)]
+            # Build grid for ASCII visualization
+            grid = [[" " for _ in range(max_width * 20)] for _ in range(height * 2 - 1)]
 
-            # Step 5: Place nodes in the grid with multi-output alignment
+            # Place nodes in the grid with more details
             task_to_pos = {}
             for layer_num, layer_tasks in layers.items():
-                layer_y = layer_num * 2  # Every second row for nodes
-                spacing = grid_width // (len(layer_tasks) + 1)
+                layer_y = layer_num * 2  # Every second row is for nodes
                 for col_num, task_idx in enumerate(layer_tasks):
-                    col_x = (col_num + 1) * spacing
+                    
                     task = self.idx_to_task[task_idx]
                     task_info = f"{task_idx}:"
 
-                    # Determine task label based on node type
+                    # Determine if it's an actor method or a regular task
                     if isinstance(task.dag_node, ClassMethodNode):
                         if task.dag_node.is_class_method_call:
                             method_name = task.dag_node.get_method_name()
@@ -2101,28 +2117,23 @@ class CompiledDAG:
                             task_info += f"Output[{task.dag_node.output_idx}]"
                         else:
                             task_info += "UnknownMethod"
-                    elif isinstance(task.dag_node, MultiOutputNode):
-                        task_info += "MultiOutputNode"
                     else:
                         task_info += type(task.dag_node).__name__
 
+                    adjust_col_num = 0
+                    if task_idx in is_multi_output:
+
+                        adjust_col_num = layers[layer_num-1].index(child2parent[task_idx])
+                    col_x = (col_num + adjust_col_num) * 20  # Every 7th column for spacing
                     # Place the task information into the grid
                     for i, char in enumerate(task_info):
-                        if col_x + i < grid_width:
+                        if col_x + i < len(grid[0]):  # Ensure we don't overflow the grid
                             grid[layer_y][col_x + i] = char
+                            
 
                     task_to_pos[task_idx] = (layer_y, col_x)
-                    
-                    # Adjust for multi-output tasks
-                    if isinstance(task.dag_node, MultiOutputNode):
-                        for i, arg in enumerate(task.dag_node.get_args()):
-                            if isinstance(arg, DAGNode):
-                                output_task_idx = self.dag_node_to_idx[arg]
-                                if output_task_idx not in task_to_pos:
-                                    # Place output task horizontally from current position
-                                    task_to_pos[output_task_idx] = (layer_y + 2, col_x + i * 15)
 
-            # Step 6: Connect the nodes with lines
+            # Connect the nodes with lines
             for upstream_task, downstream_tasks in adj_list.items():
                 upstream_y, upstream_x = task_to_pos[upstream_task]
                 for downstream_task in downstream_tasks:
@@ -2130,15 +2141,28 @@ class CompiledDAG:
 
                     # Draw vertical line
                     for y in range(upstream_y + 1, downstream_y):
-                        grid[y][upstream_x] = "|"
-                    
+                        if grid[y][upstream_x]== ' ':
+                            grid[y][upstream_x] = "|"
+
                     # Draw horizontal line if needed
                     if upstream_x != downstream_x:
                         for x in range(min(upstream_x, downstream_x) + 1, max(upstream_x, downstream_x)):
-                            if grid[downstream_y - 1][x] != '|':
+                            if grid[downstream_y - 1][x] != "|":
                                 grid[downstream_y - 1][x] = '-'
+
                     # Draw connection to the next task
                     grid[downstream_y - 1][downstream_x] = "|"
+
+            # Ensure proper multi-output task connection
+            for idx, task in self.idx_to_task.items():
+                if isinstance(task.dag_node, MultiOutputNode):
+                    output_tasks = task.dag_node.get_args()
+                    for i, output_task in enumerate(output_tasks):
+                        if isinstance(output_task, DAGNode):
+                            output_task_idx = self.dag_node_to_idx[output_task]
+                            if output_task_idx in task_to_pos:
+                                output_y, output_x = task_to_pos[output_task_idx]
+                                grid[output_y - 1][output_x] = "|"
 
             # Convert grid to string for printing
             ascii_graph = "\n".join("".join(row) for row in grid)
