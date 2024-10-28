@@ -2000,19 +2000,18 @@ class CompiledDAG:
         self._execution_index += 1
         return fut
 
-    def visualize(
-        self, format="png", filename="compiled_graph", view=False
-    ):
+    def visualize(self, format="png", filename="compiled_graph", view=False):
         """
         Visualize the compiled graph using Graphviz.
 
         his method provides two modes for visualization:
-        1. **Graphviz PNG/PDF**: Generates a graphical file representing tasks as 
-            nodes with edges representing dependencies. 
-        2. **ASCII Format**: Prints a detailed text-based visualization of the CG, 
+        1. **Graphviz PNG/PDF**: Generates a graphical file representing tasks as
+            nodes with edges representing dependencies.
+        2. **ASCII Format**: Prints a detailed text-based visualization of the CG,
             including task nodes, types, and edges with type hints.
 
-        This method should be called **after** compiling the graph with `experimental_compile()`.
+        This method should be called
+          **after** compiling the graph with `experimental_compile()`.
 
 
         Args:
@@ -2025,8 +2024,9 @@ class CompiledDAG:
 
         Returns:
             - **None** if `format` is `"png"` or `"pdf"`.
-            - **str** if `format` is `"ascii"`, returning the ASCII representation of the CG.
-            
+            - **str** if `format` is `"ascii"`,
+                returning the ASCII representation of the CG.
+
         Raises:
             ValueError: If the graph is empty or not properly compiled.
             ImportError: If the `graphviz` package is not installed.
@@ -2038,7 +2038,7 @@ class CompiledDAG:
 
             # Print the CG structure in ASCII format
             print(compiled_dag.visualize(format='ascii'))
-            """
+        """
         import graphviz
         from ray.dag import (
             InputAttributeNode,
@@ -2064,6 +2064,7 @@ class CompiledDAG:
                 )
         if format == "ascii":
             from collections import defaultdict, deque
+
             # Create adjacency list representation of the DAG
             adj_list = defaultdict(list)
             indegree = defaultdict(int)
@@ -2074,9 +2075,7 @@ class CompiledDAG:
             node_info = {}
             edge_info = []
 
-
             for idx, task in self.idx_to_task.items():
-                
                 dag_node = task.dag_node
                 label = f"Task {idx}\n"
 
@@ -2091,7 +2090,11 @@ class CompiledDAG:
                     if dag_node.is_class_method_call:
                         method_name = dag_node.get_method_name()
                         actor_handle = dag_node._get_actor_handle()
-                        actor_id = actor_handle._actor_id.hex()[:6] if actor_handle else "unknown"
+                        actor_id = (
+                            actor_handle._actor_id.hex()[:6]
+                            if actor_handle
+                            else "unknown"
+                        )
                         label += f"Actor: {actor_id}...\nMethod: {method_name}"
                     elif dag_node.is_class_method_output:
                         label += f"ClassMethodOutputNode[{dag_node.output_idx}]"
@@ -2116,7 +2119,7 @@ class CompiledDAG:
                         indegree[idx] += 1
                         edge_info.append((upstream_task_idx, idx, type_hint))
 
-            width_adjust =  0
+            width_adjust = 0
             for upstream_task_idx, child_idx_list in adj_list.items():
                 # Mark as multi-output if the node has more than one output path
                 if len(child_idx_list) > 1:
@@ -2125,10 +2128,11 @@ class CompiledDAG:
                         child2parent[child] = upstream_task_idx
                     width_adjust = max(width_adjust, len(child_idx_list))
 
-
             # Topological sort to determine layers
             layers = defaultdict(list)
-            zero_indegree = deque([idx for idx in self.idx_to_task if indegree[idx] == 0])
+            zero_indegree = deque(
+                [idx for idx in self.idx_to_task if indegree[idx] == 0]
+            )
             layer_index = 0
 
             while zero_indegree:
@@ -2146,12 +2150,14 @@ class CompiledDAG:
             # Print detailed node information
             ascii_visualization += "Nodes Information:\n"
             for idx, info in node_info.items():
-                ascii_visualization += f"{idx} [label=\"{info}\"] \n"
+                ascii_visualization += f'{idx} [label="{info}"] \n'
 
             # Print edges
             ascii_visualization += "\nEdges Information:\n"
             for upstream_task, downstream_task, type_hint in edge_info:
-                ascii_visualization += f"{upstream_task} -> {downstream_task} [label={type_hint}]\n"
+                ascii_visualization += (
+                    f"{upstream_task} -> {downstream_task} [label={type_hint}]\n"
+                )
 
             # Find the maximum width (number of nodes in any layer)
             max_width = max(len(layer) for layer in layers.values()) + width_adjust
@@ -2165,7 +2171,6 @@ class CompiledDAG:
             for layer_num, layer_tasks in layers.items():
                 layer_y = layer_num * 2  # Every second row is for nodes
                 for col_num, task_idx in enumerate(layer_tasks):
-                    
                     task = self.idx_to_task[task_idx]
                     task_info = f"{task_idx}:"
 
@@ -2183,14 +2188,18 @@ class CompiledDAG:
 
                     adjust_col_num = 0
                     if task_idx in is_multi_output:
-
-                        adjust_col_num = layers[layer_num-1].index(child2parent[task_idx])
-                    col_x = (col_num + adjust_col_num) * 20  # Every 7th column for spacing
+                        adjust_col_num = layers[layer_num - 1].index(
+                            child2parent[task_idx]
+                        )
+                    col_x = (
+                        col_num + adjust_col_num
+                    ) * 20  # Every 7th column for spacing
                     # Place the task information into the grid
                     for i, char in enumerate(task_info):
-                        if col_x + i < len(grid[0]):  # Ensure we don't overflow the grid
+                        if col_x + i < len(
+                            grid[0]
+                        ):  # Ensure we don't overflow the grid
                             grid[layer_y][col_x + i] = char
-                            
 
                     task_to_pos[task_idx] = (layer_y, col_x)
 
@@ -2202,14 +2211,17 @@ class CompiledDAG:
 
                     # Draw vertical line
                     for y in range(upstream_y + 1, downstream_y):
-                        if grid[y][upstream_x]== ' ':
+                        if grid[y][upstream_x] == " ":
                             grid[y][upstream_x] = "|"
 
                     # Draw horizontal line if needed
                     if upstream_x != downstream_x:
-                        for x in range(min(upstream_x, downstream_x) + 1, max(upstream_x, downstream_x)):
+                        for x in range(
+                            min(upstream_x, downstream_x) + 1,
+                            max(upstream_x, downstream_x),
+                        ):
                             if grid[downstream_y - 1][x] != "|":
-                                grid[downstream_y - 1][x] = '-'
+                                grid[downstream_y - 1][x] = "-"
 
                     # Draw connection to the next task
                     grid[downstream_y - 1][downstream_x] = "|"
@@ -2231,7 +2243,6 @@ class CompiledDAG:
 
             return ascii_visualization
 
-        
         else:
             # Dot file for debuging
             dot = graphviz.Digraph(name="compiled_graph", format=format)
@@ -2308,9 +2319,10 @@ class CompiledDAG:
                         # Draw an edge from the upstream task to the
                         # current task with the type hint
                         dot.edge(
-                            str(upstream_task_idx), str(current_task_idx), label=type_hint
+                            str(upstream_task_idx),
+                            str(current_task_idx),
+                            label=type_hint,
                         )
-
 
             dot.render(filename, view=view)
 
