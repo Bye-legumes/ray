@@ -8,6 +8,8 @@ import torch_npu  # The torch_npu for communicate
 
 import ray
 from ray.exceptions import RayChannelError
+from ray.experimental.channel import ChannelContext
+
 from ray.experimental.channel.gpu_communicator import (
     GPUCommunicator,
     TorchTensorAllocator,
@@ -62,9 +64,12 @@ class _HcclGroup(GPUCommunicator):
         self._rank = rank
         self._actor_handles = actor_handles
         self._closed = False
-        # Initialize distributed HCCL communication if rank is provided
-        if rank is not None:
-            self._init_dist_hccl(rank, world_size)
+        self.real_rank = None
+        self.rank_map = {}
+        if self._rank is not None:
+            self.real_rank = dist.get_rank()
+            logger.info(f"self._rank: {self._rank}, self.real_rank {self.real_rank }")
+        
 
     def _init_dist_hccl(self, rank, world_size):
         """
@@ -81,7 +86,7 @@ class _HcclGroup(GPUCommunicator):
         os.environ["HCCL_WHITELIST_DISABLE"] = os.environ.get(
             "HCCL_WHITELIST_DISABLE", "1"
         )
-
+        print(f"_init_dist_hccl rank : {rank}, world_size: {world_size}")
         torch_npu.npu.set_device(rank)  # Set the NPU device according to the rank
         self.ctx = dist.init_process_group(
             backend="hccl", world_size=world_size, rank=rank
@@ -142,10 +147,13 @@ class _HcclGroup(GPUCommunicator):
             tensor: The tensor to be sent.
             peer_rank: The rank of the peer to send the tensor to.
         """
+        real_self_rank = self.rank_map[self._rank]
+        real_peer_rank = self.rank_map[peer_rank]
         if self._closed:
             raise RuntimeError("HCCL group has been destroyed.")
-        logger.info(f"Start to send to:{peer_rank}, self._rank : {self._rank} ")
-        dist.send(tensor, dst=peer_rank)
+        logger.info(f"Start to send to:{real_peer_rank}, real_self_rank: {real_self_rank} ")
+        dist.send(tensor, dst=real_peer_rank)
+        logger.info(f"Finished to send to:{real_peer_rank}, real_self_rank : {real_self_rank} ")
 
     def recv(
         self,
@@ -166,11 +174,16 @@ class _HcclGroup(GPUCommunicator):
         Returns:
             torch.Tensor: The received tensor.
         """
+        real_self_rank = self.rank_map[self._rank]
+        real_peer_rank = self.rank_map[peer_rank]
+        logger.info(f"Start to receive, real_self_rank : {real_self_rank}, real_peer_rank:{real_peer_rank} ")
         if self._closed:
             raise RuntimeError("HCCL group has been destroyed.")
-        torch_npu.npu.set_device(f"npu:{self._rank}")
-        tensor = torch.zeros(*shape, dtype=dtype).to(f"npu:{self._rank}")
-        dist.recv(tensor, src=peer_rank)
+        torch_npu.npu.set_device(f"npu:{real_self_rank}")
+        tensor = torch.zeros(*shape, dtype=dtype).to(f"npu:{real_self_rank}")
+        dist.recv(tensor, src=real_peer_rank)
+        logger.info(f"Finished to receive, real_self_rank: {real_self_rank}, real_peer_rank:{real_peer_rank} ")
+
         if self._closed:
             raise RayChannelError("HCCL group has been destroyed.")
         return tensor

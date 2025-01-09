@@ -658,6 +658,11 @@ def _get_ranks(
     )
     return ranks
 
+def _do_set_rank(self, group_id, rank_map):
+    ctx = ChannelContext.get_current()
+    print(f"_do_set_rank ")
+    ctx.nccl_groups[group_id].rank_map = rank_map
+    return ctx.nccl_groups[group_id]
 
 def _init_nccl_group(
     actors: List[ray.actor.ActorHandle],
@@ -720,7 +725,14 @@ def _init_nccl_group(
         for rank, actor in zip(ranks, actors)
     ]
     try:
-        ray.get(init_tasks, timeout=30)
+        tmp_actors = ray.get(init_tasks, timeout=30)
+        rank_map = dict()
+        for rank, tmp_actor in zip(ranks, tmp_actors):
+            rank_map[rank] = tmp_actor.real_rank
+        logger.info(f"rank_map: {rank_map}")
+
+        set_tasks = [actor.__ray_call__.remote(_do_set_rank, group_id, rank_map) for actor in actors]
+        res = ray.get(set_tasks,  timeout=15)
     except ray.exceptions.GetTimeoutError:
         logger.warning(
             "NCCL group creation not done after 30s. NCCL group creation may be hung."
