@@ -34,51 +34,42 @@ See below the current support matrix for all collective calls with different bac
      -
      - `nccl <https://docs.nvidia.com/deeplearning/nccl/user-guide/docs/index.html>`_
      -
-     - `hccl <https://www.hiascend.com/document/detail/zh/CANNCommunityEdition/800alpha001/devguide/hccl/hcclug/hcclug_000001.html>`_
    * - Device
      - CPU
      - GPU
      - CPU
      - GPU
-     - NPU
    * - send
      - ✔
      - ✘
      - ✘
-     - ✔
      - ✔
    * - recv
      - ✔
      - ✘
      - ✘
      - ✔
-     - ✔
    * - broadcast
      - ✔
      - ✘
      - ✘
-     - ✔
      - ✔
    * - allreduce
      - ✔
      - ✘
      - ✘
      - ✔
-     - ✔
    * - reduce
      - ✔
      - ✘
      - ✘
-     - ✔
      - ✔
    * - allgather
      - ✔
      - ✘
      - ✘
      - ✔
-     - ✔
    * - gather
-     - ✘
      - ✘
      - ✘
      - ✘
@@ -88,15 +79,12 @@ See below the current support matrix for all collective calls with different bac
      - ✘
      - ✘
      - ✘
-     - ✘
    * - reduce_scatter
      - ✔
      - ✘
      - ✘
      - ✔
-     - ✔
    * - all-to-all
-     - ✘
      - ✘
      - ✘
      - ✘
@@ -105,7 +93,6 @@ See below the current support matrix for all collective calls with different bac
      - ✔
      - ✘
      - ✘
-     - ✔
      - ✔
 
 
@@ -340,9 +327,9 @@ An example code utilizing the multi-GPU collective APIs is provided below:
 
       def p2p_call(self):
           if self.rank == 0:
-             collective.send_multigpu(self.send1 * 2, 1, 1, "8")
+             collective.send_multidevice(self.send1 * 2, 1, 1, "8")
           else:
-             collective.recv_multigpu(self.recv2, 0, 0, "8")
+             collective.recv_multidevice(self.recv2, 0, 0, "8")
           return self.recv2
 
    # Note that the world size is 2 but there are 4 GPUs.
