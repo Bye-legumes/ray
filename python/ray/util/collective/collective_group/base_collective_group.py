@@ -14,7 +14,8 @@ from ray.util.collective.types import (
 )
 
 
-def get_master_address_metadata_key(group_name: str):
+def get_master_address_metadata_key(group_name: str) -> str:
+    """Return the internal KV store key for a group's master address."""
     return f"collective_group_master_address_{group_name}"
 
 

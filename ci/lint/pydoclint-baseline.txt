@@ -2472,12 +2472,16 @@ python/ray/util/collective/collective.py
     DOC202: Function `send` has a return section in docstring, but there are no return statements or annotations
     DOC107: Function `send_multigpu`: The option `--arg-type-hints-in-signature` is `True` but not all args in the signature have type hints
     DOC202: Function `send_multigpu` has a return section in docstring, but there are no return statements or annotations
+    DOC107: Function `send_multidevice`: The option `--arg-type-hints-in-signature` is `True` but not all args in the signature have type hints
+    DOC202: Function `send_multidevice` has a return section in docstring, but there are no return statements or annotations
     DOC107: Function `recv`: The option `--arg-type-hints-in-signature` is `True` but not all args in the signature have type hints
     DOC202: Function `recv` has a return section in docstring, but there are no return statements or annotations
     DOC101: Function `recv_multigpu`: Docstring contains fewer arguments than in function signature.
     DOC107: Function `recv_multigpu`: The option `--arg-type-hints-in-signature` is `True` but not all args in the signature have type hints
     DOC103: Function `recv_multigpu`: Docstring arguments are different from function arguments. (Or could be other formatting issues: https://jsh9.github.io/pydoclint/violation_codes.html#notes-on-doc103 ). Arguments in the function signature but not in the docstring: [n_elements: int].
     DOC202: Function `recv_multigpu` has a return section in docstring, but there are no return statements or annotations
+    DOC107: Function `recv_multidevice`: The option `--arg-type-hints-in-signature` is `True` but not all args in the signature have type hints
+    DOC202: Function `recv_multidevice` has a return section in docstring, but there are no return statements or annotations
     DOC202: Function `synchronize` has a return section in docstring, but there are no return statements or annotations
 --------------------
 python/ray/util/collective/collective_group/base_collective_group.py
