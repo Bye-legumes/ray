@@ -1409,5 +1409,40 @@ async def test_no_task_events_exported(shared_ray_instance, tmp_path):
         assert "JobSupervisor" not in t.name
 
 
+@pytest.mark.asyncio
+async def test_priority_preemption(shared_ray_instance, tmp_path):
+    job_manager = create_job_manager(shared_ray_instance, tmp_path)
+
+    low_job = await job_manager.submit_job(
+        entrypoint="python -c 'import time; time.sleep(30)'", priority=1
+    )
+
+    async def low_running():
+        return (
+            await job_manager._job_info_client.get_status(low_job)
+            == JobStatus.RUNNING
+        )
+
+    await async_wait_for_condition(low_running, timeout=15)
+
+    high_job = await job_manager.submit_job(
+        entrypoint="python -c 'print(\"hi\")'", priority=10
+    )
+
+    async def high_done():
+        return (
+            await job_manager._job_info_client.get_status(high_job)
+            == JobStatus.SUCCEEDED
+        )
+
+    await async_wait_for_condition(high_done, timeout=20)
+
+    async def low_stopped():
+        status = await job_manager._job_info_client.get_status(low_job)
+        return status in {JobStatus.STOPPED, JobStatus.FAILED}
+
+    await async_wait_for_condition(low_stopped, timeout=20)
+
+
 if __name__ == "__main__":
     sys.exit(pytest.main(["-v", __file__]))

@@ -100,6 +100,8 @@ class JobInfo:
     entrypoint_memory: Optional[int] = None
     #: The quantity of various custom resources to reserve for the entrypoint command.
     entrypoint_resources: Optional[Dict[str, float]] = None
+    #: Priority for this job. Higher values indicate higher priority.
+    priority: int = 0
     #: Driver agent http address
     driver_agent_http_address: Optional[str] = None
     #: The node id that driver running on. It will be None only when the job status

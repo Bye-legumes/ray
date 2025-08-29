@@ -79,6 +79,7 @@ class JobManager:
         self._log_client = JobLogStorageClient()
         self._supervisor_actor_cls = ray.remote(JobSupervisor)
         self.monitored_jobs = set()
+        self._running_jobs: Dict[str, int] = {}
         try:
             self.event_logger = get_event_logger(Event.SourceType.JOBS, logs_dir)
         except Exception:
@@ -114,12 +115,18 @@ class JobManager:
             all_jobs = await self._job_info_client.get_all_jobs()
             for job_id, job_info in all_jobs.items():
                 if not job_info.status.is_terminal():
+                    self._running_jobs[job_id] = getattr(job_info, "priority", 0)
                     run_background_task(self._monitor_job(job_id))
         finally:
             # This event is awaited in `submit_job` to avoid race conditions between
             # recovery and new job submission, so it must always get set even if there
             # are exceptions.
             self._recover_running_jobs_event.set()
+
+    def _preempt_lower_priority_jobs(self, priority: int) -> None:
+        for running_id, running_priority in list(self._running_jobs.items()):
+            if running_priority < priority:
+                self.stop_job(running_id)
 
     def _get_actor_for_job(self, job_id: str) -> Optional[ActorHandle]:
         try:
@@ -309,6 +316,8 @@ class JobManager:
                         self.event_logger.info(event_log, submission_id=job_id)
 
         # Kill the actor defensively to avoid leaking actors in unexpected error cases.
+        if job_id in self._running_jobs:
+            self._running_jobs.pop(job_id, None)
         if job_supervisor is not None:
             ray.kill(job_supervisor, no_restart=True)
 
@@ -427,6 +436,7 @@ class JobManager:
         submission_id: Optional[str] = None,
         runtime_env: Optional[Dict[str, Any]] = None,
         metadata: Optional[Dict[str, str]] = None,
+        priority: int = 0,
         entrypoint_num_cpus: Optional[Union[int, float]] = None,
         entrypoint_num_gpus: Optional[Union[int, float]] = None,
         entrypoint_memory: Optional[int] = None,
@@ -453,6 +463,8 @@ class JobManager:
                 env at ray cluster, task and actor level.
             metadata: Support passing arbitrary data to driver command in
                 case needed.
+            priority: Higher value indicates higher priority. Jobs with
+                higher priority will preempt lower priority jobs.
             entrypoint_num_cpus: The quantity of CPU cores to reserve for the execution
                 of the entrypoint command, separately from any tasks or actors launched
                 by it. Defaults to 0.
@@ -482,6 +494,8 @@ class JobManager:
         if submission_id is None:
             submission_id = generate_job_id()
 
+        self._preempt_lower_priority_jobs(priority)
+
         # Wait for `_recover_running_jobs` to run before accepting submissions to
         # avoid duplicate monitoring of the same job.
         await self._recover_running_jobs_event.wait()
@@ -497,6 +511,7 @@ class JobManager:
             entrypoint_num_gpus=entrypoint_num_gpus,
             entrypoint_memory=entrypoint_memory,
             entrypoint_resources=entrypoint_resources,
+            priority=priority,
         )
         new_key_added = await self._job_info_client.put_info(
             submission_id, job_info, overwrite=False
@@ -556,6 +571,7 @@ class JobManager:
                 _start_signal_actor=_start_signal_actor,
                 resources_specified=resources_specified,
             )
+            self._running_jobs[submission_id] = priority
 
             # Monitor the job in the background so we can detect errors without
             # requiring a client to poll.
