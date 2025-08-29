@@ -41,6 +41,7 @@ class Backend(object):
     GLOO = "gloo"
     # Use gloo through torch.distributed.
     TORCH_GLOO = "torch_gloo"
+    HCCL = "hccl"
     NIXL = "nixl"
     UNRECOGNIZED = "unrecognized"
 

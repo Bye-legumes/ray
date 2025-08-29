@@ -10,6 +10,10 @@ import ray
 from ray.util.collective import types
 from ray.util.annotations import Deprecated
 
+_NCCL_AVAILABLE = True
+_GLOO_AVAILABLE = True
+_HCCL_AVAILABLE = True
+
 logger = logging.getLogger(__name__)
 
 try:
@@ -27,6 +31,11 @@ try:
     _GLOO_AVAILABLE = True
 except ImportError:
     _GLOO_AVAILABLE = False
+
+try:
+    from ray.util.collective.collective_group.hccl_collective_group import HCCLGroup
+except ImportError:
+    _HCCL_AVAILABLE = False
 
 
 try:
@@ -64,6 +73,10 @@ def gloo_available():
 
 def torch_distributed_available():
     return _TORCH_DISTRIBUTED_AVAILABLE
+
+
+def hccl_available():
+    return _HCCL_AVAILABLE
 
 
 def nixl_available():
@@ -111,6 +124,9 @@ class GroupManager(object):
                 "Creating torch.distributed GLOO group: '{}'...".format(group_name)
             )
             g = TorchGLOOGroup(world_size, rank, group_name)
+        elif backend == types.Backend.HCCL:
+            logger.debug("Creating HCCL group: '{}'...".format(group_name))
+            g = HCCLGroup(world_size, rank, group_name)
         elif backend == types.Backend.NIXL:
             _check_backend_availability(backend)
             logger.debug("Creating NIXL Backend: '{}'...".format(group_name))
@@ -660,8 +676,8 @@ def send_multidevice(
     Returns:
         None
     """
-    if not types.cupy_available():
-        raise RuntimeError("send_multidevice call requires NCCL.")
+    if not types.cupy_available() and not hccl_available():
+        raise RuntimeError("send_multidevice call requires NCCL or HCCL.")
     _check_single_tensor_input(tensor)
     g = get_group_handle(group_name)
     _check_rank_valid(g, dst_rank)
@@ -755,8 +771,8 @@ def recv_multidevice(
     Returns:
         None
     """
-    if not types.cupy_available():
-        raise RuntimeError("recv_multidevice call requires NCCL.")
+    if not types.cupy_available() and not hccl_available():
+        raise RuntimeError("recv_multidevice call requires NCCL or HCCL.")
     _check_single_tensor_input(tensor)
     g = get_group_handle(group_name)
     _check_rank_valid(g, src_rank)
@@ -871,6 +887,9 @@ def _check_backend_availability(backend: types.Backend):
     elif backend == types.Backend.TORCH_GLOO:
         if not torch_distributed_available():
             raise RuntimeError("torch.distributed is not available.")
+    elif backend == types.Backend.HCCL:
+        if not hccl_available():
+            raise RuntimeError("HCCL is not available.")
     elif backend == types.Backend.NIXL:
         if not nixl_available():
             raise RuntimeError("NIXL is not available.")
