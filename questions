@@ -1,0 +1,395 @@
+"""This is exmaple of multiturn chat
+"{
+  "messages": [
+    {
+      "role": "user",
+      "content": "Initial question"
+    },
+    {
+      "role": "assistant",
+      "content": "<think>\nReasoning part\n</think>\nFirst response"
+    },
+    {
+      "role": "user",
+      "content": "Follow-up question"
+    },
+    {
+      "role": "assistant",
+      "content": "<think>\nThinking about the follow-up\n</think>\nResponse to follow-up"
+    }
+  ]
+}"
+
+
+The special tokens are:
+- `<think>`: Marks the beginning of the reasoning part of the assistant's response.
+- `</think>`: Marks the end of the reasoning part of the assistant's response.
+
+Then we can make it to 2 flatten format data:
+
+{
+    "messages": [
+        {
+            "role": "user",
+            "content": "Initial question"
+        },
+        {
+            "role": "assistant",
+            "content": "<think>Reasoning par</think>First response"
+        }
+    ]
+}
+and 
+{
+    "messages": [
+        {
+            "role": "user",
+            "content": "Initial question<|im_end|>\n<|im_start|>assistant\n<think></think>First response<|im_end|>\n<|im_start|>user\nFollow-up question"
+        },
+        {
+            "role": "assistant",
+            "content": "<think>Thinking about the follow-up</think>Response to follow-up"
+        }
+    ]
+}
+
+In the flatten format, we concatenate the content of all messages into one message for each role.
+We only keeps the reasoning part of the assistant's response in the assistant's message, and delete the previous response part and leave it empty.
+The special tokens `<|im_start|>` and `<|im_end|>` are used to separate different messages in the flattened format.
+
+
+Here is another example of the original data with 6 turns:
+If the original data has 6 turns (user assistant user assistant user assistant), the first flatten format will have 6 turns,
+{
+    "messages": [
+        {
+            "role": "user",
+            "content": "Initial question"
+        },
+        {
+            "role": "assistant",
+            "content": "<think>Reasoning part</think>First response"
+        },
+        {
+            "role": "user",
+            "content": "Follow-up question"
+        },
+        {
+            "role": "assistant",
+            "content": "<think>Thinking about the follow-up</think>Response to follow-up"
+        },
+        {
+            "role": "user",
+            "content": "Follow-up question2"
+        },
+        {
+            "role": "assistant",
+            "content": "<think>Thinking about the follow-up2</think>Response to follow-up2"
+        }
+    ]
+}
+
+Then it will be flatten into 3 flattened samples:
+
+{
+    "messages": [
+        {
+            "role": "user",
+            "content": "Initial question"
+        },
+        {
+            "role": "assistant",
+            "content": "<think>Reasoning par</think>First response"
+        }
+    ]
+}
+
+{
+    "messages": [
+        {
+            "role": "user",
+            "content": "Initial question<|im_end|>\n<|im_start|>assistant\n<think></think>First response<|im_end|>\n<|im_start|>user\nFollow-up question"
+        },
+        {
+            "role": "assistant",
+            "content": "<think>Thinking about the follow-up</think>Response to follow-up"
+        }
+    ]
+}
+
+{
+    "messages": [
+        {
+            "role": "user",
+            "content": "Initial question<|im_end|>\n<|im_start|>assistant\n<think></think>First response<|im_end|>\n<|im_start|>user\nFollow-up question<|im_end|>\n<|im_start|>assistant\n<think></think>Response to follow-up<|im_end|>\n<|im_start|>user\nFollow-up question2"
+        },
+        {
+            "role": "assistant",
+            "content": "<think>Thinking about the follow-up2</think>Response to follow-up2"
+        }
+    ]
+}
+
+
+Now your task is to convert the first format data to the second format data, and then convert the second format data to the first format data. 
+"""
+import json
+import re
+
+# =================================================================
+# SAMPLE INPUT DATA
+# =================================================================
+
+# 1. Original Multi-turn Data (mixed 2 conversations: 4 rounds + 6 rounds)
+ORIGINAL_DATA = [
+    {
+        "messages": [
+            {"role": "user", "content": "A question 1"},
+            {"role": "assistant", "content": "<think>A reasoning 1</think>A answer 1"},
+            {"role": "user", "content": "A question 2"},
+            {"role": "assistant", "content": "<think>A reasoning 2</think>A answer 2"},
+            {"role": "user", "content": "A question 3"},
+            {"role": "assistant", "content": "<think>A reasoning 3</think>A answer 3"},
+            {"role": "user", "content": "A question 4"},
+            {"role": "assistant", "content": "<think>A reasoning 4</think>A answer 4"},
+        ]
+    },
+    {
+        "messages": [
+            {"role": "user", "content": "B question 1"},
+            {"role": "assistant", "content": "<think>B reasoning 1</think>B answer 1"},
+            {"role": "user", "content": "B question 2"},
+            {"role": "assistant", "content": "<think>B reasoning 2</think>B answer 2"},
+            {"role": "user", "content": "B question 3"},
+            {"role": "assistant", "content": "<think>B reasoning 3</think>B answer 3"},
+            {"role": "user", "content": "B question 4"},
+            {"role": "assistant", "content": "<think>B reasoning 4</think>B answer 4"},
+            {"role": "user", "content": "B question 5"},
+            {"role": "assistant", "content": "<think>B reasoning 5</think>B answer 5"},
+            {"role": "user", "content": "B question 6"},
+            {"role": "assistant", "content": "<think>B reasoning 6</think>B answer 6"},
+        ]
+    },
+]
+
+# 2. Scrambled Flattened Samples (For the reconstruction task)
+# Flattened results from both conversations, scrambled together (total: 10)
+SCRAMBLED_FLATTENED_SAMPLES = [
+    {
+        "messages": [
+            {
+                "role": "user",
+                "content": "B question 1<|im_end|>\n<|im_start|>assistant\n<think></think>B answer 1<|im_end|>\n<|im_start|>user\nB question 2<|im_end|>\n<|im_start|>assistant\n<think></think>B answer 2<|im_end|>\n<|im_start|>user\nB question 3<|im_end|>\n<|im_start|>assistant\n<think></think>B answer 3<|im_end|>\n<|im_start|>user\nB question 4<|im_end|>\n<|im_start|>assistant\n<think></think>B answer 4<|im_end|>\n<|im_start|>user\nB question 5"
+            },
+            {
+                "role": "assistant",
+                "content": "<think>B reasoning 5</think>B answer 5"
+            }
+        ]
+    },
+    {
+        "messages": [
+            {
+                "role": "user",
+                "content": "A question 1<|im_end|>\n<|im_start|>assistant\n<think></think>A answer 1<|im_end|>\n<|im_start|>user\nA question 2<|im_end|>\n<|im_start|>assistant\n<think></think>A answer 2<|im_end|>\n<|im_start|>user\nA question 3<|im_end|>\n<|im_start|>assistant\n<think></think>A answer 3<|im_end|>\n<|im_start|>user\nA question 4"
+            },
+            {
+                "role": "assistant",
+                "content": "<think>A reasoning 4</think>A answer 4"
+            }
+        ]
+    },
+    {
+        "messages": [
+            {
+                "role": "user",
+                "content": "A question 1<|im_end|>\n<|im_start|>assistant\n<think></think>A answer 1<|im_end|>\n<|im_start|>user\nA question 2"
+            },
+            {
+                "role": "assistant",
+                "content": "<think>A reasoning 2</think>A answer 2"
+            }
+        ]
+    },
+    {
+        "messages": [
+            {
+                "role": "user",
+                "content": "B question 1"
+            },
+            {
+                "role": "assistant",
+                "content": "<think>B reasoning 1</think>B answer 1"
+            }
+        ]
+    },
+    {
+        "messages": [
+            {
+                "role": "user",
+                "content": "B question 1<|im_end|>\n<|im_start|>assistant\n<think></think>B answer 1<|im_end|>\n<|im_start|>user\nB question 2<|im_end|>\n<|im_start|>assistant\n<think></think>B answer 2<|im_end|>\n<|im_start|>user\nB question 3<|im_end|>\n<|im_start|>assistant\n<think></think>B answer 3<|im_end|>\n<|im_start|>user\nB question 4"
+            },
+            {
+                "role": "assistant",
+                "content": "<think>B reasoning 4</think>B answer 4"
+            }
+        ]
+    },
+    {
+        "messages": [
+            {
+                "role": "user",
+                "content": "A question 1"
+            },
+            {
+                "role": "assistant",
+                "content": "<think>A reasoning 1</think>A answer 1"
+            }
+        ]
+    },
+    {
+        "messages": [
+            {
+                "role": "user",
+                "content": "B question 1<|im_end|>\n<|im_start|>assistant\n<think></think>B answer 1<|im_end|>\n<|im_start|>user\nB question 2<|im_end|>\n<|im_start|>assistant\n<think></think>B answer 2<|im_end|>\n<|im_start|>user\nB question 3<|im_end|>\n<|im_start|>assistant\n<think></think>B answer 3<|im_end|>\n<|im_start|>user\nB question 4<|im_end|>\n<|im_start|>assistant\n<think></think>B answer 4<|im_end|>\n<|im_start|>user\nB question 5<|im_end|>\n<|im_start|>assistant\n<think></think>B answer 5<|im_end|>\n<|im_start|>user\nB question 6"
+            },
+            {
+                "role": "assistant",
+                "content": "<think>B reasoning 6</think>B answer 6"
+            }
+        ]
+    },
+    {
+        "messages": [
+            {
+                "role": "user",
+                "content": "B question 1<|im_end|>\n<|im_start|>assistant\n<think></think>B answer 1<|im_end|>\n<|im_start|>user\nB question 2<|im_end|>\n<|im_start|>assistant\n<think></think>B answer 2<|im_end|>\n<|im_start|>user\nB question 3"
+            },
+            {
+                "role": "assistant",
+                "content": "<think>B reasoning 3</think>B answer 3"
+            }
+        ]
+    },
+    {
+        "messages": [
+            {
+                "role": "user",
+                "content": "A question 1<|im_end|>\n<|im_start|>assistant\n<think></think>A answer 1<|im_end|>\n<|im_start|>user\nA question 2<|im_end|>\n<|im_start|>assistant\n<think></think>A answer 2<|im_end|>\n<|im_start|>user\nA question 3"
+            },
+            {
+                "role": "assistant",
+                "content": "<think>A reasoning 3</think>A answer 3"
+            }
+        ]
+    },
+    {
+        "messages": [
+            {
+                "role": "user",
+                "content": "B question 1<|im_end|>\n<|im_start|>assistant\n<think></think>B answer 1<|im_end|>\n<|im_start|>user\nB question 2"
+            },
+            {
+                "role": "assistant",
+                "content": "<think>B reasoning 2</think>B answer 2"
+            }
+        ]
+    },
+]
+
+# =================================================================
+# TASK 1: CONVERT MULTI-TURN TO FLATTENED SAMPLES
+# =================================================================
+
+def flatten_multiturn_to_samples(data: dict) -> list:
+    """
+    Converts a multi-turn chat into a list of flattened samples.
+    
+    Logic:
+    1. For every assistant response, create a new sample.
+    2. The 'user' content of the sample should contain all previous history.
+    3. In the history, assistant's <think> content must be emptied.
+    4. Use <|im_start|> and <|im_end|> as separators.
+    5. Quick shape example:
+       - U = user, A = assistant
+       - Original turns: U1 A1 U2 A2 U3 A3
+       - 1) Sample #1 shape: U1A1
+            user content = U1
+            assistant content = A1
+       - 2) Sample #2 shape: (U1A1U2)A2
+            user content = U1 + A1(with <think></think>) + U2
+            assistant content = A2
+       - 3) Sample #3 shape: (U1A1U2A2U3)A3
+            user content = U1 + A1(with <think></think>) + U2 + A2(with <think></think>) + U3
+            assistant content = A3
+
+    Hint:
+    - You can remove reasoning text inside think tokens with regex.
+    - Example usage:
+      cleaned = re.sub(r"<think>.*?</think>", "<think></think>", text, flags=re.DOTALL)
+    - Sample input:
+      text = "<think>Reasoning part</think>Final answer"
+    - Sample output:
+      "<think></think>Final answer"
+    """
+    flattened_samples = []
+    
+    # TODO: Implement the logic here
+    
+    return flattened_samples
+
+# =================================================================
+# TASK 2: RECONSTRUCT ORIGINAL FROM FLATTENED SAMPLES
+# =================================================================
+
+def reconstruct_multiturn_from_samples(samples: list) -> dict:
+    """
+    Finds the 'longest' or most complete sample from a list of 
+    flattened samples and reconstructs the original multi-turn format.
+    
+    Logic:
+    1. Identify the sample that contains the most turns.
+    2. Parse the content to separate roles and messages.
+    3. Restore the assistant reasoning parts from the final assistant messages
+       of previous samples (since history versions are emptied).
+    """
+    original_format = {"messages": []}
+    
+    # TODO: Implement the logic here
+    
+    return original_format
+
+# =================================================================
+# TEST SUITE
+# =================================================================
+
+def test_flattening():
+    print("--- Testing Task 1: Flattening ---")
+    # ORIGINAL_DATA now contains 2 conversations (4 rounds + 6 rounds).
+    # Expected flattened samples total = 4 + 6 = 10
+    results = []
+    for convo in ORIGINAL_DATA:
+        results.extend(flatten_multiturn_to_samples(convo))
+    print(json.dumps(results, indent=4, ensure_ascii=False))
+    assert len(results) == 10, "Should produce 10 samples for mixed 4-round and 6-round data"
+
+def test_reconstruction():
+    print("\n--- Testing Task 2: Reconstruction ---")
+    # We pass the scrambled list to ensure the function finds the "tail" of the conversation
+    reconstructed = reconstruct_multiturn_from_samples(SCRAMBLED_FLATTENED_SAMPLES)
+    print(json.dumps(reconstructed, indent=4, ensure_ascii=False))
+    
+    # Basic validation
+    assert len(reconstructed["messages"]) in (8, 12)
+
+if __name__ == "__main__":
+    # Candidates can run these tests individually
+    try:
+        test_flattening()
+    except NotImplementedError:
+        print("Task 1 not implemented.")
+        
+    try:
+        test_reconstruction()
+    except NotImplementedError:
+        print("Task 2 not implemented.")
